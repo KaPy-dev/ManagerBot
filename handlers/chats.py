@@ -14,7 +14,7 @@ async def bot_membership_changed(event: ChatMemberUpdated):
     status = event.new_chat_member.status
     if status in ("member", "administrator", "creator"):
         title = chat.title or chat.username or str(chat.id)
-        await storage.add_chat(chat.id, title)
+        await storage.add_chat(chat.id, title, chat.type)
         logger.info(f"Bot added to chat {chat.id} ({title})")
     else:
         await storage.remove_chat(chat.id)
