@@ -4,5 +4,8 @@ services:
     image: answer-bot:latest
     container_name: answer-bot
     restart: unless-stopped
+    volumes:
+      - ./storage:/app/storage:rw,z
+      - ./loginning/log:/app/loginning/log:rw,z
     environment:
       - TZ=Europe/Moscow
