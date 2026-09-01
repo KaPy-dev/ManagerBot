@@ -56,6 +56,12 @@ class FakeSession(BaseSession):
             )
         if name == "EditMessageText":
             self.sent.append((method.chat_id, method.text))
+        if name == "GetChat":
+            cid = int(method.chat_id)
+            if cid < 0:
+                from aiogram.types import ChatFullInfo
+                return ChatFullInfo.model_construct(id=cid, type="supergroup", title="Заявки Vavilon", username=None)
+            raise RuntimeError("user chat not available")
         return True
 
 
@@ -308,6 +314,7 @@ async def test_admin():
     await feed(msg_update(OWNER, "/admin"))
     await feed(cb_update(OWNER, "adm:chats"))
     check("владелец видит чаты", "-100500" in last_text(OWNER))
+    check("название чата показано", "Заявки Vavilon" in last_text(OWNER) and "группа" in last_text(OWNER))
     await feed(cb_update(OWNER, "adm:chat_menu"))
     await feed(cb_update(OWNER, "adm:setchat:-100500"))
     check("чат заявок установлен", storage.manager_chat_id == -100500)

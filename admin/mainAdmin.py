@@ -46,6 +46,29 @@ def dossier_text(dossier: dict) -> str:
     return "\n".join(lines)
 
 
+CHAT_TYPE_RU = {"channel": "канал", "supergroup": "группа", "group": "группа"}
+
+
+def chat_line(chat_id) -> str:
+    info = storage.chat_info(chat_id)
+    icon = "📢" if info.get("type") == "channel" else "💬"
+    type_ru = CHAT_TYPE_RU.get(info.get("type"), "чат")
+    return f"{icon} <b>{info['title']}</b> ({type_ru}) — <code>{chat_id}</code>"
+
+
+async def refresh_chats():
+    for chat_id in list(storage.chats.keys()):
+        try:
+            chat = await insert_bot.get_chat(int(chat_id))
+            title = chat.title or chat.username or str(chat_id)
+            await storage.add_chat(int(chat_id), title, chat.type)
+        except AttributeError:
+            pass
+        except Exception:
+            logger.info(f"Чат {chat_id} недоступен — убираю из списка")
+            await storage.remove_chat(int(chat_id))
+
+
 async def users_list_view(call: CallbackQuery, page: int, item_prefix: str,
                           list_prefix: str, search_cb: str, back_cb: str, title: str):
     from keyboard.admin.mainAdmin import usersListPanel
@@ -60,10 +83,16 @@ async def users_list_view(call: CallbackQuery, page: int, item_prefix: str,
 def panel_text(user_id: int) -> str:
     role = "👑 Владелец" if storage.is_owner(user_id) else "🛡 Администратор"
     chat = storage.manager_chat_id
-    chat_line = f"<code>{chat}</code>" if chat != 0 else "не задан ⚠️"
+    if chat == 0:
+        chat_str = "не задан ⚠️"
+    elif str(chat) in storage.data["chats"]:
+        info = storage.chat_info(chat)
+        chat_str = f"<b>{info['title']}</b> (<code>{chat}</code>)"
+    else:
+        chat_str = f"<code>{chat}</code>"
     text = f"⚙️ <b>Панель управления</b>\n\nВаша роль: <b>{role}</b>"
     if storage.is_owner(user_id):
-        text += f"\nЧат для заявок: {chat_line}"
+        text += f"\nЧат для заявок: {chat_str}"
     return text
 
 
@@ -249,9 +278,10 @@ async def admin_callbacks(call: CallbackQuery, state: FSMContext):
 
     if action == "chats":
         from keyboard.admin.mainAdmin import backPanel
+        await refresh_chats()
         chats = storage.chats
         if chats:
-            lines = [f"💬 {title} — <code>{chat_id}</code>" for chat_id, title in chats.items()]
+            lines = [chat_line(chat_id) for chat_id in chats]
             text = "💬 <b>Чаты, в которых состоит бот</b>\n\n" + "\n".join(lines)
         else:
             text = "💬 <b>Чаты бота</b>\n\nБот пока не добавлен ни в один чат или канал."
@@ -260,8 +290,10 @@ async def admin_callbacks(call: CallbackQuery, state: FSMContext):
 
     if action == "chat_menu":
         from keyboard.admin.mainAdmin import chatMenuPanel
+        await refresh_chats()
         chat = storage.manager_chat_id
-        current = f"<code>{chat}</code>" if chat != 0 else "не задан ⚠️"
+        current = chat_line(chat) if chat != 0 and str(chat) in storage.data["chats"] \
+            else (f"<code>{chat}</code>" if chat != 0 else "не задан ⚠️")
         await safe_edit(
             call,
             f"📌 <b>Чат для заявок</b>\n\nТекущий: {current}\n\n"

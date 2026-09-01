@@ -16,7 +16,7 @@ class UserTrackMiddleware(BaseMiddleware):
             from modules.storage import storage
             if str(chat.id) not in storage.data["chats"]:
                 title = chat.title or chat.username or str(chat.id)
-                await storage.add_chat(chat.id, title)
+                await storage.add_chat(chat.id, title, chat.type)
                 logger.info(f"Chat {chat.id} ({title}) registered from activity")
 
         user = data.get("event_from_user")
