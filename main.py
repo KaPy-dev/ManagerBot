@@ -60,7 +60,7 @@ async def main():
         from modules.track import UserTrackMiddleware
         dp.update.outer_middleware(UserTrackMiddleware())
 
-        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(drop_pending_updates=False)
         autosave_task = asyncio.create_task(fsm_store.autosave_loop())
         logger.info("Bot polling started")
         try:

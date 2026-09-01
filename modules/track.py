@@ -11,6 +11,14 @@ class UserTrackMiddleware(BaseMiddleware):
         super().__init__()
 
     async def __call__(self, handler, event, data):
+        chat = data.get("event_chat")
+        if chat and chat.type != "private":
+            from modules.storage import storage
+            if str(chat.id) not in storage.data["chats"]:
+                title = chat.title or chat.username or str(chat.id)
+                await storage.add_chat(chat.id, title)
+                logger.info(f"Chat {chat.id} ({title}) registered from activity")
+
         user = data.get("event_from_user")
         if user and not user.is_bot:
             now = time.monotonic()
