@@ -92,10 +92,12 @@ async def ask_size(message: Message, state: FSMContext):
 
 
 async def ask_city(message: Message, state: FSMContext):
-    from keyboard.panels import textStepPanel
+    from keyboard.panels import cityPanel
     await message.answer(
-        "<b>Шаг 5 из 7</b> · Город\n\nУкажите город установки/доставки:",
-        reply_markup=await textStepPanel()
+        "<b>Шаг 5 из 7</b> · Город\n\n"
+        "Укажите город установки/доставки —\n"
+        "или отправьте текущее местоположение кнопкой ниже 👇",
+        reply_markup=await cityPanel()
     )
     await state.set_state(fsm.Brief.com_city)
 
@@ -292,15 +294,52 @@ async def screen_size_handler(message: Message, state: FSMContext):
     await ask_city(message, state)
 
 
+def resolve_city(lat: float, lon: float) -> str:
+    try:
+        from geopy.geocoders import Nominatim
+        geolocator = Nominatim(user_agent="manager_bot", timeout=4)
+        location = geolocator.reverse((lat, lon), language="ru", zoom=10)
+        if location and location.raw.get("address"):
+            address = location.raw["address"]
+            city = address.get("city") or address.get("town") or address.get("village") or address.get("municipality")
+            if city:
+                return city
+    except Exception:
+        logger.warning(f"Геокодер недоступен для точки {lat}, {lon}")
+    return f"📍 {lat:.5f}, {lon:.5f}"
+
+
+@router.message(fsm.Brief.com_city, F.location)
+async def city_location_handler(message: Message, state: FSMContext):
+    import asyncio
+    lat, lon = message.location.latitude, message.location.longitude
+    city = await asyncio.to_thread(resolve_city, lat, lon)
+    await state.update_data(city=city)
+    await message.answer(f"📍 Принято: <b>{city}</b>", reply_markup=ReplyKeyboardRemove())
+    await ask_phone(message, state)
+
+
+@router.message(fsm.Brief.com_city, F.text == "⬅️ Назад")
+async def city_back_handler(message: Message, state: FSMContext):
+    await message.answer("↩️ Возвращаемся…", reply_markup=ReplyKeyboardRemove())
+    await ask_size(message, state)
+
+
+@router.message(fsm.Brief.com_city, F.text == "❌ Отменить")
+async def city_cancel_handler(message: Message, state: FSMContext):
+    await log_cancelled(message.from_user.id, await state.get_data())
+    await state.clear()
+    await message.answer(
+        "❌ Заполнение отменено.\n\nЧтобы начать заново — отправьте /start",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
 @router.message(fsm.Brief.com_city, F.text)
 async def city_handler(message: Message, state: FSMContext):
     city = (message.text or "").strip()
     if not city or len(city) > 100 or city.startswith("/"):
-        from keyboard.panels import textStepPanel
-        await message.answer(
-            "⚠️ Укажите город текстом, например: <code>Москва</code>",
-            reply_markup=await textStepPanel()
-        )
+        await message.answer("⚠️ Укажите город текстом, например: <code>Москва</code> — или отправьте геолокацию кнопкой ниже 👇")
         return
     await state.update_data(city=city)
     await ask_phone(message, state)

@@ -131,6 +131,20 @@ def contact_update(user_id, phone):
     )
 
 
+def location_update(user_id, lat, lon):
+    from aiogram.types import Location
+    return Update(
+        update_id=next_id(),
+        message=Message(
+            message_id=next_id(),
+            date=datetime.now(timezone.utc),
+            chat=Chat(id=user_id, type="private"),
+            from_user=tg_user(user_id),
+            location=Location(latitude=lat, longitude=lon),
+        ),
+    )
+
+
 def cb_update(user_id, data):
     return Update(
         update_id=next_id(),
@@ -244,6 +258,29 @@ async def test_brief_flows():
     check("контакт принят", "Принято" in [t for c, t in session.sent if c == 1006 and t and "Принято" in t][-1] if any(c == 1006 and t and "Принято" in (t or "") for c, t in session.sent) else False)
     await feed(msg_update(1006, "contact@mail.ru"))
     check("заявка с контактом завершена", "Спасибо" in last_text(1006))
+
+    print("\n== Город геолокацией ==")
+    await feed(msg_update(1008, "/start"))
+    await feed(cb_update(1008, "purchase:commercial"))
+    await feed(cb_update(1008, "mounting:wall"))
+    await feed(cb_update(1008, "service:front"))
+    await feed(msg_update(1008, "200x100"))
+    await feed(location_update(1008, 55.7558, 37.6173))
+    check("локация принята", "Принято" in "".join(t or "" for c, t in session.sent if c == 1008))
+    await feed(msg_update(1008, "+7 900 555 66 77"))
+    await feed(msg_update(1008, "geo@mail.ru"))
+    check("заявка с геолокацией завершена", "Спасибо" in last_text(1008))
+
+    await feed(msg_update(1009, "/start"))
+    await feed(cb_update(1009, "purchase:commercial"))
+    await feed(cb_update(1009, "mounting:wall"))
+    await feed(cb_update(1009, "service:front"))
+    await feed(msg_update(1009, "200x100"))
+    await feed(msg_update(1009, "⬅️ Назад"))
+    check("назад с шага города", "Размер экрана" in last_text(1009))
+    await feed(msg_update(1009, "300x200"))
+    await feed(msg_update(1009, "❌ Отменить"))
+    check("отмена с шага города", "отменено" in last_text(1009))
 
     print("\n== Назад/Отмена с reply-кнопок на шаге телефона ==")
     await feed(msg_update(1007, "/start"))
