@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+configuration/conf.env
+storage/
+
+full_log.log
+loginning/log/
+docker_data/

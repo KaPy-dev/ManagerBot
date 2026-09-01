@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    image: answer-bot:latest
+    container_name: answer-bot
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Moscow
