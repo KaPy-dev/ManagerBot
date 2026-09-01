@@ -97,8 +97,14 @@ class Storage:
             self.data["admins"].append(old_owner)
         await self._save()
 
-    async def add_chat(self, chat_id: int, title: str):
-        self.data["chats"][str(chat_id)] = title
+    def chat_info(self, chat_id) -> dict:
+        value = self.data["chats"].get(str(chat_id))
+        if isinstance(value, str):
+            return {"title": value, "type": "group"}
+        return value or {"title": str(chat_id), "type": "group"}
+
+    async def add_chat(self, chat_id: int, title: str, chat_type: str = "group"):
+        self.data["chats"][str(chat_id)] = {"title": title, "type": chat_type}
         await self._save()
 
     async def remove_chat(self, chat_id: int):

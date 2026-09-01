@@ -107,10 +107,18 @@ async def confirmRemovePanel(admin_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def chat_title(value) -> str:
+    return value["title"] if isinstance(value, dict) else value
+
+
+def chat_icon(value) -> str:
+    return "📢" if isinstance(value, dict) and value.get("type") == "channel" else "💬"
+
+
 async def chatMenuPanel(chats: dict) -> InlineKeyboardMarkup:
     kb = [
-        [InlineKeyboardButton(text=f"💬 {title}", callback_data=f"adm:setchat:{chat_id}")]
-        for chat_id, title in list(chats.items())[:20]
+        [InlineKeyboardButton(text=f"{chat_icon(value)} {chat_title(value)}", callback_data=f"adm:setchat:{chat_id}")]
+        for chat_id, value in list(chats.items())[:20]
     ]
     kb.append([InlineKeyboardButton(text="✍️ Ввести ID вручную", callback_data="adm:enter_chat")])
     kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:back")])
