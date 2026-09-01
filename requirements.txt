@@ -2,3 +2,4 @@ aiogram==3.31.0
 python-dotenv
 colorlog
 aiosqlite
+geopy

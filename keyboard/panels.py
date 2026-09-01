@@ -88,6 +88,20 @@ async def phonePanel() -> ReplyKeyboardMarkup:
     )
 
 
+async def cityPanel() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📍 Отправить текущее местоположение", request_location=True),
+            ],
+            [
+                KeyboardButton(text="⬅️ Назад"),
+                KeyboardButton(text="❌ Отменить"),
+            ]
+        ], resize_keyboard=True, one_time_keyboard=True
+    )
+
+
 async def textStepPanel() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[navRow()])
 
