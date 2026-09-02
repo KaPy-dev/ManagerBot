@@ -106,6 +106,17 @@ async def textStepPanel() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[navRow()])
 
 
+async def emailPanel() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⏭ Пропустить", callback_data="brief:skip_email"),
+            ],
+            navRow(),
+        ]
+    )
+
+
 async def resumePanel() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

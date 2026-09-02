@@ -117,14 +117,15 @@ async def ask_phone(message: Message, state: FSMContext):
 
 
 async def ask_email(message: Message, state: FSMContext):
-    from keyboard.panels import textStepPanel
+    from keyboard.panels import emailPanel
     data = await state.get_data()
     step = "Шаг 4 из 4" if data.get("branch") == "gov" else "Шаг 7 из 7"
     await message.answer(
         f"<b>{step}</b> · Почта\n\n"
         "Введите адрес электронной почты,\n"
-        "например: <code>name@example.com</code>",
-        reply_markup=await textStepPanel()
+        "например: <code>name@example.com</code>\n\n"
+        "Этот шаг можно пропустить — телефон у нас уже есть 👌",
+        reply_markup=await emailPanel()
     )
     await state.set_state(fsm.Brief.email)
 
@@ -388,26 +389,33 @@ async def phone_handler(message: Message, state: FSMContext):
     await ask_email(message, state)
 
 
+@router.callback_query(fsm.Brief.email, F.data == "brief:skip_email")
+async def skip_email_handler(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await clear_markup(call)
+    await finish_brief(call.message, state, user=call.from_user)
+
+
 @router.message(fsm.Brief.email, F.text)
 async def email_handler(message: Message, state: FSMContext):
     email = (message.text or "").strip()
     if not EMAIL_RE.match(email):
-        from keyboard.panels import textStepPanel
+        from keyboard.panels import emailPanel
         await message.answer(
             "⚠️ Почта не распознана.\n\n"
-            "Введите адрес в формате: <code>name@example.com</code>",
-            reply_markup=await textStepPanel()
+            "Введите адрес в формате: <code>name@example.com</code> — или пропустите шаг",
+            reply_markup=await emailPanel()
         )
         return
     await state.update_data(email=email)
     await finish_brief(message, state)
 
 
-async def finish_brief(message: Message, state: FSMContext):
+async def finish_brief(message: Message, state: FSMContext, user=None):
     data = await state.get_data()
     await state.clear()
 
-    user = message.from_user
+    user = user or message.from_user
     username = f"@{user.username}" if user.username else "не указан"
 
     lines = [
@@ -428,7 +436,7 @@ async def finish_brief(message: Message, state: FSMContext):
     lines += [
         "",
         f"📞 <b>Телефон:</b> {data.get('phone')}",
-        f"📧 <b>Почта:</b> {data.get('email')}",
+        f"📧 <b>Почта:</b> {data.get('email') or 'не указана'}",
         "",
         f"👤 Клиент: {username} (ID: <code>{user.id}</code>)",
     ]
