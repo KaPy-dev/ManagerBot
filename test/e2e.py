@@ -259,6 +259,17 @@ async def test_brief_flows():
     await feed(msg_update(1006, "contact@mail.ru"))
     check("заявка с контактом завершена", "Спасибо" in last_text(1006))
 
+    print("\n== Пропуск почты ==")
+    await feed(msg_update(1010, "/start"))
+    await feed(cb_update(1010, "purchase:gov44"))
+    await feed(cb_update(1010, "gov_comm:consult"))
+    await feed(msg_update(1010, "89005554433"))
+    await feed(cb_update(1010, "brief:skip_email"))
+    check("заявка без почты завершена", "Спасибо" in last_text(1010))
+    from modules.async_.db.async_req import db as _db
+    row = await _db.fetch_one("SELECT email, phone, status FROM briefs WHERE tg_id = 1010 ORDER BY id DESC LIMIT 1")
+    check("заявка сохранена без почты", row is not None and row["email"] is None and row["phone"] and row["status"] == "completed")
+
     print("\n== Город геолокацией ==")
     await feed(msg_update(1008, "/start"))
     await feed(cb_update(1008, "purchase:commercial"))
