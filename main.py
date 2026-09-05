@@ -62,11 +62,23 @@ async def main():
 
         await bot.delete_webhook(drop_pending_updates=False)
         autosave_task = asyncio.create_task(fsm_store.autosave_loop())
+
+        # Внешний HTTP API для заявок с сайта — только если задана секретная фраза
+        api_server = None
+        if config.API_SECRET:
+            from api.server import ApiServer
+            api_server = ApiServer(bot, config.API_SECRET, config.API_HOST, config.API_PORT)
+            await api_server.start()
+        else:
+            logger.warning("API_SECRET не задан в conf.env — внешний HTTP API выключен")
+
         logger.info("Bot polling started")
         try:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
         finally:
             autosave_task.cancel()
+            if api_server:
+                await api_server.stop()
             saved = fsm_store.dump()
             logger.info(f"Состояния FSM сохранены на диск: {saved}")
 
