@@ -418,29 +418,8 @@ async def finish_brief(message: Message, state: FSMContext, user=None):
     user = user or message.from_user
     username = f"@{user.username}" if user.username else "не указан"
 
-    lines = [
-        "📋 <b>Новая заявка</b>",
-        "",
-        f"<b>Тип закупки:</b> {data.get('purchase')}",
-    ]
-    if "communication" in data:
-        lines.append(f"<b>Формат коммуникации:</b> {data['communication']}")
-    if "mounting" in data:
-        lines.append(f"<b>Вариант исполнения:</b> {data['mounting']}")
-    if "service" in data:
-        lines.append(f"<b>Тип обслуживания:</b> {data['service']}")
-    if "screen_size" in data:
-        lines.append(f"<b>Размер экрана:</b> {data['screen_size']}")
-    if "city" in data:
-        lines.append(f"<b>Город:</b> {data['city']}")
-    lines += [
-        "",
-        f"📞 <b>Телефон:</b> {data.get('phone')}",
-        f"📧 <b>Почта:</b> {data.get('email') or 'не указана'}",
-        "",
-        f"👤 Клиент: {username} (ID: <code>{user.id}</code>)",
-    ]
-    brief_text = "\n".join(lines)
+    from modules.brief_text import build_brief_text
+    brief_text = build_brief_text(data, client=f"{username} (ID: <code>{user.id}</code>)")
 
     from modules.orm.user import save_brief
     try:

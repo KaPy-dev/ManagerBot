@@ -9,3 +9,6 @@ services:
       - ./loginning/log:/app/loginning/log:rw,z
     environment:
       - TZ=Europe/Moscow
+    # Внешний HTTP API для заявок с сайта (API_SECRET/API_PORT в configuration/conf.env)
+    ports:
+      - "${API_PORT:-8090}:8090"
