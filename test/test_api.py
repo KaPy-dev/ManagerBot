@@ -88,6 +88,17 @@ async def run():
         r = await client.post("/api/v1/leads", json=LEAD)
         check("заявка без секрета — 401 и не отправлена", r.status == 401 and len(bot.sent) == 1)
 
+        call = {"kind": "callback", "lead_id": 18, "name": "Иванов <i>Иван</i>", "phone": "+7 900 123-45-67", "purchase": "Заказ звонка", "page": "https://dipled.ru/kontakty"}
+        r = await client.post("/api/v1/leads", json=call, headers=auth)
+        text = bot.sent[-1][1]
+        check("заказ звонка принят", r.status == 200 and len(bot.sent) == 2)
+        check("звонок помечен и без анкеты", "📞 <b>Заказ звонка</b> (сайт)" in text and "Тип закупки" not in text and "Почта" not in text)
+        check("ФИО, телефон и номер заявки", "<b>ФИО:</b> Иванов &lt;i&gt;" in text and "<b>Телефон:</b> +7 900 123-45-67" in text and "заявка #18" in text and "🔗 https://dipled.ru/kontakty" in text)
+        r = await client.post("/api/v1/leads", json={**call, "name": ""}, headers=auth)
+        check("звонок без ФИО — 400", r.status == 400)
+        r = await client.post("/api/v1/leads", json={**call, "kind": "spam"}, headers=auth)
+        check("неизвестный kind — 400", r.status == 400)
+
         bot.fail = True
         r = await client.post("/api/v1/leads", json=LEAD, headers=auth)
         check("ошибка Telegram — 502", r.status == 502 and "chat not found" in (await r.json())["error"])

@@ -7,7 +7,8 @@
 Маршруты (префикс /api/v1):
   GET  /health   — жив ли процесс (без авторизации, только {"status": "ok"})
   GET  /status   — бот, чат менеджеров, версия API (нужна авторизация)
-  POST /leads    — отправить заявку в чат менеджеров (нужна авторизация)
+  POST /leads    — отправить заявку в чат менеджеров (нужна авторизация);
+                   kind=callback — заказ звонка: обязательны только name и phone
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from html import escape
 from aiohttp import web
 from aiogram import Bot
 
-from modules.brief_text import build_brief_text
+from modules.brief_text import build_brief_text, build_callback_text
 from modules.storage import storage
 
 API_VERSION = "1"
@@ -31,6 +32,9 @@ LEAD_FIELDS = {
     "purchase": 60, "communication": 80, "mounting": 80, "service": 80, "screen_size": 80,
     "city": 100, "phone": 40, "email": 120, "name": 120, "description": 4000, "page": 500, "source": 40,
 }
+
+# lead — анкета как в брифе бота; callback — «Заказать звонок» с сайта (только ФИО и телефон)
+LEAD_KINDS = ("lead", "callback")
 
 log = logging.getLogger("api")
 
@@ -92,7 +96,14 @@ def _clean_lead(payload: dict) -> tuple[dict, str | None]:
             data[key] = value
     if not data.get("phone"):
         return {}, "Не указан телефон"
-    if not data.get("purchase"):
+    kind = payload.get("kind") or "lead"
+    if kind not in LEAD_KINDS:
+        return {}, "Поле «kind» должно быть lead или callback"
+    data["kind"] = kind
+    if kind == "callback":
+        if not data.get("name"):
+            return {}, "Не указано ФИО"
+    elif not data.get("purchase"):
         return {}, "Не указан тип закупки"
     lead_id = payload.get("lead_id")
     if lead_id is not None and not isinstance(lead_id, (int, str)):
@@ -100,6 +111,13 @@ def _clean_lead(payload: dict) -> tuple[dict, str | None]:
     if lead_id is not None:
         data["lead_id"] = str(lead_id)[:40]
     return data, None
+
+
+def _lead_text(data: dict, source: str, extra: list[str] | None) -> str:
+    client = escape(data["name"]) if data.get("name") else "имя не указано"
+    if data.get("lead_id"):
+        client += f" · {escape(source)}, заявка #{escape(data['lead_id'])}"
+    return build_brief_text(data, client=client, source=source, extra=extra)
 
 
 async def create_lead(request: web.Request) -> web.Response:
@@ -119,11 +137,11 @@ async def create_lead(request: web.Request) -> web.Response:
         return _json_error(503, "Чат для заявок не задан: владелец выбирает его в боте через /admin")
 
     source = data.get("source") or "сайт"
-    client = escape(data["name"]) if data.get("name") else "имя не указано"
-    if data.get("lead_id"):
-        client += f" · {escape(source)}, заявка #{escape(data['lead_id'])}"
     extra = [f"🔗 {escape(data['page'])}"] if data.get("page") else None
-    text = build_brief_text(data, client=client, source=source, extra=extra)
+    if data["kind"] == "callback":
+        text = build_callback_text(data, source=source, extra=extra)
+    else:
+        text = _lead_text(data, source, extra)
 
     bot: Bot = request.app["bot"]
     try:
