@@ -16,6 +16,25 @@ FIELDS = (
 )
 
 
+def build_callback_text(data: dict, source: str | None = None, extra: list[str] | None = None) -> str:
+    """Заказ звонка с сайта: анкеты нет, только ФИО и телефон — менеджеру нужно перезвонить."""
+    title = "📞 <b>Заказ звонка</b>" + (f" ({escape(source)})" if source else "")
+    note = "Перезвонить клиенту"
+    if data.get("lead_id"):
+        note += f" · {escape(source or 'сайт')}, заявка #{escape(str(data['lead_id']))}"
+    lines = [
+        title,
+        "",
+        f"👤 <b>ФИО:</b> {escape(str(data.get('name') or 'не указано'))}",
+        f"📱 <b>Телефон:</b> {escape(str(data.get('phone') or ''))}",
+        "",
+        note,
+    ]
+    if extra:
+        lines += extra
+    return "\n".join(lines)
+
+
 def build_brief_text(data: dict, client: str, source: str | None = None, extra: list[str] | None = None) -> str:
     """Собирает HTML-текст заявки.
 
