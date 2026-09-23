@@ -27,6 +27,7 @@ async def main():
         global dp
 
         from modules.storage import storage
+        logger.info(f"Профиль: {config.ENV_NAME} (env-файл {config.ENV_FILE}, storage {config.STORAGE_DIR}, API-порт {config.API_PORT})")
         if storage.manager_chat_id == 0:
             logger.warning("Чат для заявок не задан — владелец может указать его через /admin")
         if storage.owner_id == 0:
@@ -43,7 +44,7 @@ async def main():
 
         bot = insert_bot
         from modules.fsm_storage import PersistentMemoryStorage
-        fsm_store = PersistentMemoryStorage(config.PATH_DIR / "storage/fsm_state.json")
+        fsm_store = PersistentMemoryStorage(config.FSM_PATH)
         if fsm_store._restored:
             logger.info(f"Восстановлено незавершённых сессий: {fsm_store._restored}")
         dp = Dispatcher(storage=fsm_store)

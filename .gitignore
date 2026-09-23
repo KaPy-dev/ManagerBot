@@ -9,3 +9,8 @@ storage/
 full_log.log
 loginning/log/
 docker_data/
+
+# dev-профиль (тестовый бот)
+configuration/conf.dev.env
+storage-dev/
+loginning/log-dev/
