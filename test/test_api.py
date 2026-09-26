@@ -106,10 +106,10 @@ async def run():
         body = await r.json()
         check("письмо принято", r.status == 200 and body["ok"] and body["chat_id"] == -100123 and len(bot.sent) == 3)
         text = bot.sent[-1][1]
-        check("письмо оформлено", "📨 <b>Письмо на почту</b> (info@dipled.ru)" in text and "<b>Тема:</b> Запрос &lt;КП&gt;" in text and "<b>Дата:</b> 26.09.2026 15:00" in text)
-        check("отправитель экранирован", "<b>От:</b> Иван &lt;b&gt; &lt;ivan@zakupki.ru&gt;" in text)
+        check("письмо оформлено", text.startswith("📨 <b>Письмо на почту</b>\n\n👤 <b>От:</b> Иван &lt;b&gt;\n📧 ivan@zakupki.ru\n📝 <b>Тема:</b> Запрос &lt;КП&gt;\n"))
+        check("без ящика, номера и правила", "info@dipled.ru" not in text and "#12" not in text and "Госзаказчики" not in text)
         check("вложения и текст", "📎 <b>Вложения:</b> kp.pdf (117 КБ)" in text and "<blockquote expandable>Здравствуйте!\nНужен экран 3×2 м.…</blockquote>" in text)
-        check("подвал письма", "✉️ письмо #12 · правило «Госзаказчики» · полный текст в админке сайта" in text)
+        check("дата в конце", text.endswith("🕒 26.09.2026 15:00\n<i>Текст сокращён — полностью письмо в ящике и в админке сайта</i>"))
         r = await client.post("/api/v1/mail", json={"attachments": []}, headers=auth)
         check("пустое письмо — 400", r.status == 400)
         r = await client.post("/api/v1/mail", json=mail)

@@ -17,14 +17,17 @@ def format_size(size: int) -> str:
 
 
 def build_mail_text(data: dict) -> str:
-    """HTML-текст письма. data — поля из запроса сайта (см. api/server.py: MAIL_FIELDS)."""
+    """HTML-текст письма для чата менеджеров: кто написал (имя и адрес отдельно), тема, вложения, текст, дата."""
     sender = escape(str(data.get("sender") or ""))
     name = escape(str(data.get("sender_name") or ""))
-    who = f"{name} &lt;{sender}&gt;" if name and sender else name or sender or "не указан"
-    title = "📨 <b>Письмо на почту</b>" + (f" ({escape(str(data['mailbox']))})" if data.get("mailbox") else "")
-    lines = [title, "", f"<b>От:</b> {who}", f"<b>Тема:</b> {escape(str(data.get('subject') or '(без темы)'))}"]
-    if data.get("sent_at_text"):
-        lines.append(f"<b>Дата:</b> {escape(str(data['sent_at_text']))}")
+    lines = ["📨 <b>Письмо на почту</b>", ""]
+    if name:
+        lines.append(f"👤 <b>От:</b> {name}")
+        if sender:
+            lines.append(f"📧 {sender}")
+    else:
+        lines.append(f"👤 <b>От:</b> {sender or 'не указан'}")
+    lines.append(f"📝 <b>Тема:</b> {escape(str(data.get('subject') or '(без темы)'))}")
     attachments = [a for a in data.get("attachments") or [] if isinstance(a, dict) and a.get("name")]
     if attachments:
         listed = ", ".join(f"{escape(str(a['name']))} ({format_size(int(a.get('size') or 0))})" for a in attachments[:10])
@@ -36,10 +39,9 @@ def build_mail_text(data: dict) -> str:
         lines.append(f"<blockquote expandable>{escape(body)}{'…' if data.get('truncated') else ''}</blockquote>")
     else:
         lines.append("<i>(письмо без текста)</i>")
-    footer = [f"✉️ письмо #{escape(str(data['mail_id']))}"] if data.get("mail_id") else ["✉️ письмо"]
-    if data.get("matched_rule"):
-        footer.append(f"правило «{escape(str(data['matched_rule']))}»")
+    lines.append("")
+    if data.get("sent_at_text"):
+        lines.append(f"🕒 {escape(str(data['sent_at_text']))}")
     if data.get("truncated"):
-        footer.append("полный текст в админке сайта")
-    lines += ["", " · ".join(footer)]
-    return "\n".join(lines)
+        lines.append("<i>Текст сокращён — полностью письмо в ящике и в админке сайта</i>")
+    return "\n".join(lines).rstrip()
