@@ -99,9 +99,29 @@ async def run():
         r = await client.post("/api/v1/leads", json={**call, "kind": "spam"}, headers=auth)
         check("неизвестный kind — 400", r.status == 400)
 
+        mail = {"mail_id": 12, "mailbox": "info@dipled.ru", "sender": "ivan@zakupki.ru", "sender_name": "Иван <b>", "subject": "Запрос <КП>",
+                "sent_at_text": "26.09.2026 15:00", "body": "Здравствуйте!\nНужен экран 3×2 м.", "truncated": True,
+                "attachments": [{"name": "kp.pdf", "size": 120000}, "мусор", {"size": 1}], "matched_rule": "Госзаказчики"}
+        r = await client.post("/api/v1/mail", json=mail, headers=auth)
+        body = await r.json()
+        check("письмо принято", r.status == 200 and body["ok"] and body["chat_id"] == -100123 and len(bot.sent) == 3)
+        text = bot.sent[-1][1]
+        check("письмо оформлено", "📨 <b>Письмо на почту</b> (info@dipled.ru)" in text and "<b>Тема:</b> Запрос &lt;КП&gt;" in text and "<b>Дата:</b> 26.09.2026 15:00" in text)
+        check("отправитель экранирован", "<b>От:</b> Иван &lt;b&gt; &lt;ivan@zakupki.ru&gt;" in text)
+        check("вложения и текст", "📎 <b>Вложения:</b> kp.pdf (117 КБ)" in text and "<blockquote expandable>Здравствуйте!\nНужен экран 3×2 м.…</blockquote>" in text)
+        check("подвал письма", "✉️ письмо #12 · правило «Госзаказчики» · полный текст в админке сайта" in text)
+        r = await client.post("/api/v1/mail", json={"attachments": []}, headers=auth)
+        check("пустое письмо — 400", r.status == 400)
+        r = await client.post("/api/v1/mail", json=mail)
+        check("письмо без секрета — 401", r.status == 401 and len(bot.sent) == 3)
+        r = await client.get("/api/v1/status", headers=auth)
+        check("status сообщает поддержку писем", "mail" in (await r.json())["features"])
+
         bot.fail = True
         r = await client.post("/api/v1/leads", json=LEAD, headers=auth)
         check("ошибка Telegram — 502", r.status == 502 and "chat not found" in (await r.json())["error"])
+        r = await client.post("/api/v1/mail", json=mail, headers=auth)
+        check("ошибка Telegram для письма — 502", r.status == 502)
         bot.fail = False
 
         await storage.set_manager_chat(0)

@@ -65,17 +65,19 @@ docker compose up -d --build
 - `storage/answerbot.db` — SQLite: пользователи и история заявок (досье в /admin).
 - `storage/fsm_state.json` — незавершённые опросы, восстанавливаются после рестарта.
 
-## Внешний HTTP API (заявки с сайта)
+## Внешний HTTP API (заявки и письма с сайта)
 
 Бот поднимает HTTP-сервер в том же процессе, что и polling (порт `API_PORT`, по умолчанию 8090).
-Сайт dipled.ru шлёт через него заявки в тот же чат менеджеров, что и бриф в Telegram, тем же текстом.
+Сайт dipled.ru шлёт через него заявки в тот же чат менеджеров, что и бриф в Telegram, тем же текстом,
+а микросервис почты сайта (mailwatcher) — входящие письма с ящика компании.
 Все запросы, кроме `/health`, должны нести заголовок `X-Api-Secret` с фразой из `API_SECRET`.
 
 | Метод | Путь | Что делает |
 |---|---|---|
 | GET | `/api/v1/health` | проверка, что процесс жив (без секрета) |
-| GET | `/api/v1/status` | бот, выбранный чат менеджеров, версия API |
+| GET | `/api/v1/status` | бот, выбранный чат менеджеров, версия API, `features: ["leads", "mail"]` |
 | POST | `/api/v1/leads` | отправить заявку в чат менеджеров |
+| POST | `/api/v1/mail` | переслать входящее письмо в чат менеджеров (текст — `modules/mail_text.py`) |
 
 Тело `POST /api/v1/leads` (JSON, обязательны `phone` и `purchase`):
 
@@ -85,6 +87,16 @@ docker compose up -d --build
   "mounting": "Настенный", "service": "Фронтальный", "screen_size": "300 x 200 см (Г x В)", "city": "Омск",
   "communication": null, "phone": "+7 900 123-45-67", "email": "ivan@example.com", "name": "Иван",
   "description": "Комментарий клиента", "page": "https://dipled.ru/zayavka"
+}
+```
+
+Тело `POST /api/v1/mail` (JSON; нужно хотя бы одно из `sender`, `subject`, `body`):
+
+```json
+{
+  "mail_id": 12, "mailbox": "info@dipled.ru", "sender": "ivan@zakupki.ru", "sender_name": "Иван",
+  "subject": "Запрос КП", "sent_at_text": "26.09.2026 15:00", "body": "текст письма (до 3000 символов)",
+  "truncated": false, "attachments": [{"name": "kp.pdf", "size": 120000}], "matched_rule": "Госзаказчики"
 }
 ```
 
