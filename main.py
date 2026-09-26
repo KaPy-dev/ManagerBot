@@ -50,10 +50,12 @@ async def main():
         dp = Dispatcher(storage=fsm_store)
 
         from handlers.chats import router as chats_router
+        from handlers.tasks import router as tasks_router
         from admin.mainAdmin import router as admin_router
         from handlers.brief import router as brief_router
 
         dp.include_router(chats_router)
+        dp.include_router(tasks_router)  # до brief_router: там catch-all на любые callback
         dp.include_router(admin_router)
         dp.include_router(brief_router)
 

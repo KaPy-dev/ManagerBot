@@ -10,7 +10,8 @@
   POST /leads    — отправить заявку в чат менеджеров (нужна авторизация);
                    kind=callback — заказ звонка: обязательны только name и phone
   POST /mail     — переслать входящее письмо с почты компании в чат менеджеров
-                   (шлёт микросервис mailwatcher сайта; текст собирает modules/mail_text.py)
+                   (шлёт микросервис mailwatcher сайта; текст собирает modules/mail_text.py);
+                   под сообщением кнопки «Выполнено» / «Вернуть в работу» (modules/tasks.py)
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from html import escape
 from aiohttp import web
 from aiogram import Bot
 
+from modules import tasks
 from modules.brief_text import build_brief_text, build_callback_text
 from modules.mail_text import build_mail_text
 from modules.storage import storage
@@ -215,7 +217,8 @@ async def forward_mail(request: web.Request) -> web.Response:
 
     bot: Bot = request.app["bot"]
     try:
-        message = await bot.send_message(chat_id, build_mail_text(data), disable_web_page_preview=True)
+        message = await bot.send_message(chat_id, tasks.open_text(build_mail_text(data)), reply_markup=tasks.keyboard(done=False),
+                                         disable_web_page_preview=True)
     except Exception as e:  # noqa: BLE001 — любую ошибку Telegram отдаём сайту как 502
         log.error("API: Telegram не принял письмо %s: %s", data.get("mail_id"), e, exc_info=True)
         return _json_error(502, f"Telegram не принял сообщение: {e}")

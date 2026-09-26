@@ -77,7 +77,7 @@ docker compose up -d --build
 | GET | `/api/v1/health` | проверка, что процесс жив (без секрета) |
 | GET | `/api/v1/status` | бот, выбранный чат менеджеров, версия API, `features: ["leads", "mail"]` |
 | POST | `/api/v1/leads` | отправить заявку в чат менеджеров |
-| POST | `/api/v1/mail` | переслать входящее письмо в чат менеджеров (текст — `modules/mail_text.py`) |
+| POST | `/api/v1/mail` | переслать входящее письмо в чат менеджеров (текст — `modules/mail_text.py`); под сообщением кнопки «✅ Выполнено» / «↩️ Вернуть в работу», отметка «кто и когда» пишется в само сообщение (`modules/tasks.py`, `handlers/tasks.py`) |
 
 Тело `POST /api/v1/leads` (JSON, обязательны `phone` и `purchase`):
 
@@ -112,6 +112,7 @@ docker compose up -d --build
 ```bash
 python test/e2e.py
 python test/test_api.py
+python test/test_tasks.py
 ```
 
 E2E без сети: сценарии брифа, админка, нагрузка 300 пользователей, персистентность.

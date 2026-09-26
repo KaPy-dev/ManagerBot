@@ -27,3 +27,6 @@ LOG_PATH = pathlib.Path(os.getenv("LOG_DIR", str(PATH_DIR / "loginning" / "log")
 API_SECRET = os.getenv("API_SECRET", "").strip()
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8090"))
+
+# Часовой пояс для отметок «выполнено — кто, когда» в чате менеджеров
+TZ_NAME = os.getenv("TZ_NAME", "Europe/Moscow")
