@@ -39,6 +39,21 @@ docker compose up -d --build
 | `API_SECRET` | секретная фраза внешнего HTTP API (заявки с сайта). Пустая — API выключен |
 | `API_HOST`, `API_PORT` | адрес и порт HTTP API (по умолчанию `0.0.0.0:8090`) |
 
+## Тестовый бот для локальной отладки (dev-профиль)
+
+Чтобы отлаживать сайт и бота на своих группах, не задевая прод:
+
+1. Создать у @BotFather второго, тестового бота, добавить его в тестовую группу администратором.
+2. `cp configuration/conf.dev.env.example configuration/conf.dev.env`, вписать `TOKEN` тестового бота.
+3. `./run-dev.sh` — бот стартует с `conf.dev.env`, данными в `storage-dev/` и HTTP API на `127.0.0.1:8091`.
+4. В тестовом боте `/admin` → «📌 Чат для заявок» → выбрать тестовую группу.
+
+Локальный сайт DIPLED в режиме `DIPLED_ENV=dev` сам берёт секрет и порт API из `conf.dev.env`
+(или всё поднимается разом: `dipled/dev.sh up`). Прод-бот (`conf.env`, `storage/`, порт 8090) ничего об этом не знает.
+
+Переменные профиля: `ANSWERBOT_ENV` (имя, пишется в лог), `ANSWERBOT_ENV_FILE` (какой env-файл читать),
+`STORAGE_DIR` (папка настроек/базы/сессий), `LOG_DIR`; точечные `STORAGE_PATH`, `DB_PATH`, `FSM_PATH` по-прежнему работают.
+
 ## Роли
 
 - **Владелец** — назначает/удаляет админов, видит чаты бота, меняет чат заявок, может передать права.
@@ -50,17 +65,19 @@ docker compose up -d --build
 - `storage/answerbot.db` — SQLite: пользователи и история заявок (досье в /admin).
 - `storage/fsm_state.json` — незавершённые опросы, восстанавливаются после рестарта.
 
-## Внешний HTTP API (заявки с сайта)
+## Внешний HTTP API (заявки и письма с сайта)
 
 Бот поднимает HTTP-сервер в том же процессе, что и polling (порт `API_PORT`, по умолчанию 8090).
-Сайт dipled.ru шлёт через него заявки в тот же чат менеджеров, что и бриф в Telegram, тем же текстом.
+Сайт dipled.ru шлёт через него заявки в тот же чат менеджеров, что и бриф в Telegram, тем же текстом,
+а микросервис почты сайта (mailwatcher) — входящие письма с ящика компании.
 Все запросы, кроме `/health`, должны нести заголовок `X-Api-Secret` с фразой из `API_SECRET`.
 
 | Метод | Путь | Что делает |
 |---|---|---|
 | GET | `/api/v1/health` | проверка, что процесс жив (без секрета) |
-| GET | `/api/v1/status` | бот, выбранный чат менеджеров, версия API |
+| GET | `/api/v1/status` | бот, выбранный чат менеджеров, версия API, `features: ["leads", "mail"]` |
 | POST | `/api/v1/leads` | отправить заявку в чат менеджеров |
+| POST | `/api/v1/mail` | переслать входящее письмо в чат менеджеров (текст — `modules/mail_text.py`); под сообщением кнопки «✅ Выполнено» / «↩️ Вернуть в работу», отметка «кто и когда» пишется в само сообщение (`modules/tasks.py`, `handlers/tasks.py`) |
 
 Тело `POST /api/v1/leads` (JSON, обязательны `phone` и `purchase`):
 
@@ -70,6 +87,16 @@ docker compose up -d --build
   "mounting": "Настенный", "service": "Фронтальный", "screen_size": "300 x 200 см (Г x В)", "city": "Омск",
   "communication": null, "phone": "+7 900 123-45-67", "email": "ivan@example.com", "name": "Иван",
   "description": "Комментарий клиента", "page": "https://dipled.ru/zayavka"
+}
+```
+
+Тело `POST /api/v1/mail` (JSON; нужно хотя бы одно из `sender`, `subject`, `body`):
+
+```json
+{
+  "mail_id": 12, "mailbox": "info@dipled.ru", "sender": "ivan@zakupki.ru", "sender_name": "Иван",
+  "subject": "Запрос КП", "sent_at_text": "26.09.2026 15:00", "body": "текст письма (до 3000 символов)",
+  "truncated": false, "attachments": [{"name": "kp.pdf", "size": 120000}], "matched_rule": "Госзаказчики"
 }
 ```
 
@@ -85,6 +112,7 @@ docker compose up -d --build
 ```bash
 python test/e2e.py
 python test/test_api.py
+python test/test_tasks.py
 ```
 
 E2E без сети: сценарии брифа, админка, нагрузка 300 пользователей, персистентность.

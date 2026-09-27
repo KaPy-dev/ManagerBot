@@ -9,6 +9,9 @@
   GET  /status   — бот, чат менеджеров, версия API (нужна авторизация)
   POST /leads    — отправить заявку в чат менеджеров (нужна авторизация);
                    kind=callback — заказ звонка: обязательны только name и phone
+  POST /mail     — переслать входящее письмо с почты компании в чат менеджеров
+                   (шлёт микросервис mailwatcher сайта; текст собирает modules/mail_text.py);
+                   под сообщением кнопки «Выполнено» / «Вернуть в работу» (modules/tasks.py)
 """
 
 from __future__ import annotations
@@ -20,10 +23,13 @@ from html import escape
 from aiohttp import web
 from aiogram import Bot
 
+from modules import tasks
 from modules.brief_text import build_brief_text, build_callback_text
+from modules.mail_text import build_mail_text
 from modules.storage import storage
 
-API_VERSION = "1"
+API_VERSION = "2"
+FEATURES = ("leads", "mail")
 SECRET_HEADER = "X-Api-Secret"
 MAX_BODY = 64 * 1024
 
@@ -35,6 +41,11 @@ LEAD_FIELDS = {
 
 # lead — анкета как в брифе бота; callback — «Заказать звонок» с сайта (только ФИО и телефон)
 LEAD_KINDS = ("lead", "callback")
+
+# Поля входящего письма (POST /mail) и ограничения длины; вложения — список {name, size}
+MAIL_FIELDS = {"mailbox": 200, "sender": 320, "sender_name": 200, "subject": 1000, "sent_at": 40, "sent_at_text": 40,
+               "body": 3000, "matched_rule": 200, "source": 40}
+MAIL_MAX_ATTACHMENTS = 50
 
 log = logging.getLogger("api")
 
@@ -73,6 +84,7 @@ async def status(request: web.Request) -> web.Response:
     return web.json_response({
         "ok": True,
         "api_version": API_VERSION,
+        "features": list(FEATURES),
         "bot": {"id": me.id, "username": me.username} if me else None,
         "manager_chat": {"id": chat_id, "title": info.get("title") if info else None} if chat_id else None,
     })
@@ -154,6 +166,67 @@ async def create_lead(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "chat_id": chat_id, "message_id": message.message_id})
 
 
+def _clean_mail(payload: dict) -> tuple[dict, str | None]:
+    if not isinstance(payload, dict):
+        return {}, "Ожидается JSON-объект"
+    data: dict = {}
+    for key, max_len in MAIL_FIELDS.items():
+        value = payload.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, (str, int, float)):
+            return {}, f"Поле «{key}» должно быть строкой"
+        value = str(value).strip()
+        if len(value) > max_len:
+            value = value[:max_len]
+        if value:
+            data[key] = value
+    if not data.get("sender") and not data.get("subject") and not data.get("body"):
+        return {}, "Пустое письмо: нет ни отправителя, ни темы, ни текста"
+    attachments = payload.get("attachments") or []
+    if not isinstance(attachments, list):
+        return {}, "Поле «attachments» должно быть списком"
+    data["attachments"] = [
+        {"name": str(a.get("name") or "")[:200], "size": int(a["size"]) if str(a.get("size") or "0").isdigit() else 0}
+        for a in attachments[:MAIL_MAX_ATTACHMENTS] if isinstance(a, dict) and a.get("name")
+    ]
+    data["truncated"] = bool(payload.get("truncated"))
+    mail_id = payload.get("mail_id")
+    if mail_id is not None and not isinstance(mail_id, (int, str)):
+        return {}, "Поле «mail_id» должно быть числом или строкой"
+    if mail_id is not None:
+        data["mail_id"] = str(mail_id)[:40]
+    return data, None
+
+
+async def forward_mail(request: web.Request) -> web.Response:
+    if request.content_length and request.content_length > MAX_BODY:
+        return _json_error(413, "Слишком большой запрос")
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return _json_error(400, "Тело запроса не является корректным JSON")
+    data, error = _clean_mail(payload)
+    if error:
+        return _json_error(400, error)
+
+    chat_id = storage.manager_chat_id
+    if not chat_id:
+        log.error("API: письмо не отправлено — чат менеджеров не выбран")
+        return _json_error(503, "Чат для заявок не задан: владелец выбирает его в боте через /admin")
+
+    bot: Bot = request.app["bot"]
+    try:
+        message = await bot.send_message(chat_id, tasks.open_text(build_mail_text(data)), reply_markup=tasks.keyboard(done=False),
+                                         disable_web_page_preview=True)
+    except Exception as e:  # noqa: BLE001 — любую ошибку Telegram отдаём сайту как 502
+        log.error("API: Telegram не принял письмо %s: %s", data.get("mail_id"), e, exc_info=True)
+        return _json_error(502, f"Telegram не принял сообщение: {e}")
+
+    log.info("API: письмо %s от %s отправлено в чат %s, message_id=%s", data.get("mail_id"), data.get("sender"), chat_id, message.message_id)
+    return web.json_response({"ok": True, "chat_id": chat_id, "message_id": message.message_id})
+
+
 def build_app(bot: Bot, secret: str) -> web.Application:
     app = web.Application(middlewares=[auth_middleware], client_max_size=MAX_BODY)
     app["bot"] = bot
@@ -162,6 +235,7 @@ def build_app(bot: Bot, secret: str) -> web.Application:
         web.get("/api/v1/health", health),
         web.get("/api/v1/status", status),
         web.post("/api/v1/leads", create_lead),
+        web.post("/api/v1/mail", forward_mail),
     ])
     return app
 
