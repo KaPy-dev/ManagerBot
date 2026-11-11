@@ -12,26 +12,36 @@
   POST /mail     — переслать входящее письмо с почты компании в чат менеджеров
                    (шлёт микросервис mailwatcher сайта; текст собирает modules/mail_text.py);
                    под сообщением кнопки «Выполнено» / «Вернуть в работу» (modules/tasks.py)
+  POST /mail/files — файлы письма ответом на его сообщение (multipart: mail_id, reply_to, file × 1–10)
 """
 
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 from html import escape
+from urllib.parse import unquote
 
-from aiohttp import web
 from aiogram import Bot
+from aiogram.types import BufferedInputFile, InputMediaDocument, ReplyParameters
+from aiohttp import BodyPartReader, web
 
 from modules import tasks
 from modules.brief_text import build_brief_text, build_callback_text
 from modules.mail_text import build_mail_text
 from modules.storage import storage
 
-API_VERSION = "2"
-FEATURES = ("leads", "mail")
+API_VERSION = "3"
+FEATURES = ("leads", "mail", "mail_files")
 SECRET_HEADER = "X-Api-Secret"
 MAX_BODY = 64 * 1024
+
+# POST /mail/files: лимит Bot API на загрузку — 50 МБ
+MAX_FILES_BODY = 50 * 1024 * 1024
+MAX_FILES = 10
+MAX_FIELD = 1024
+FILES_TIMEOUT = 300
 
 # Поля анкеты, которые принимаем с сайта, и ограничения длины
 LEAD_FIELDS = {
@@ -46,12 +56,38 @@ LEAD_KINDS = ("lead", "callback")
 MAIL_FIELDS = {"mailbox": 200, "sender": 320, "sender_name": 200, "subject": 1000, "sent_at": 40, "sent_at_text": 40,
                "body": 3000, "matched_rule": 200, "source": 40}
 MAIL_MAX_ATTACHMENTS = 50
+MAIL_NOTE_MAX = 60
 
 log = logging.getLogger("api")
 
 
 def _json_error(status: int, message: str) -> web.Response:
     return web.json_response({"ok": False, "error": message}, status=status)
+
+
+class _TooLarge(Exception):
+    pass
+
+
+async def _read_json(request: web.Request):
+    """JSON с лимитом MAX_BODY, в том числе для тел без Content-Length (chunked)."""
+    if request.content_length and request.content_length > MAX_BODY:
+        raise _TooLarge
+    raw = bytearray()
+    async for chunk in request.content.iter_chunked(8192):
+        raw += chunk
+        if len(raw) > MAX_BODY:
+            raise _TooLarge
+    return json.loads(raw)
+
+
+async def _json_payload(request: web.Request) -> tuple[object, web.Response | None]:
+    try:
+        return await _read_json(request), None
+    except _TooLarge:
+        return None, _json_error(413, "Слишком большой запрос")
+    except Exception:  # noqa: BLE001
+        return None, _json_error(400, "Тело запроса не является корректным JSON")
 
 
 @web.middleware
@@ -133,12 +169,9 @@ def _lead_text(data: dict, source: str, extra: list[str] | None) -> str:
 
 
 async def create_lead(request: web.Request) -> web.Response:
-    if request.content_length and request.content_length > MAX_BODY:
-        return _json_error(413, "Слишком большой запрос")
-    try:
-        payload = await request.json()
-    except Exception:  # noqa: BLE001
-        return _json_error(400, "Тело запроса не является корректным JSON")
+    payload, failure = await _json_payload(request)
+    if failure:
+        return failure
     data, error = _clean_lead(payload)
     if error:
         return _json_error(400, error)
@@ -166,6 +199,14 @@ async def create_lead(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "chat_id": chat_id, "message_id": message.message_id})
 
 
+def _clean_attachment(a: dict) -> dict:
+    item = {"name": str(a.get("name") or "")[:200], "size": int(a["size"]) if str(a.get("size") or "0").isdigit() else 0}
+    note = a.get("note")
+    if isinstance(note, str) and note.strip():
+        item["note"] = note.strip()[:MAIL_NOTE_MAX]
+    return item
+
+
 def _clean_mail(payload: dict) -> tuple[dict, str | None]:
     if not isinstance(payload, dict):
         return {}, "Ожидается JSON-объект"
@@ -186,10 +227,7 @@ def _clean_mail(payload: dict) -> tuple[dict, str | None]:
     attachments = payload.get("attachments") or []
     if not isinstance(attachments, list):
         return {}, "Поле «attachments» должно быть списком"
-    data["attachments"] = [
-        {"name": str(a.get("name") or "")[:200], "size": int(a["size"]) if str(a.get("size") or "0").isdigit() else 0}
-        for a in attachments[:MAIL_MAX_ATTACHMENTS] if isinstance(a, dict) and a.get("name")
-    ]
+    data["attachments"] = [_clean_attachment(a) for a in attachments[:MAIL_MAX_ATTACHMENTS] if isinstance(a, dict) and a.get("name")]
     data["truncated"] = bool(payload.get("truncated"))
     mail_id = payload.get("mail_id")
     if mail_id is not None and not isinstance(mail_id, (int, str)):
@@ -200,12 +238,9 @@ def _clean_mail(payload: dict) -> tuple[dict, str | None]:
 
 
 async def forward_mail(request: web.Request) -> web.Response:
-    if request.content_length and request.content_length > MAX_BODY:
-        return _json_error(413, "Слишком большой запрос")
-    try:
-        payload = await request.json()
-    except Exception:  # noqa: BLE001
-        return _json_error(400, "Тело запроса не является корректным JSON")
+    payload, failure = await _json_payload(request)
+    if failure:
+        return failure
     data, error = _clean_mail(payload)
     if error:
         return _json_error(400, error)
@@ -227,8 +262,99 @@ async def forward_mail(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "chat_id": chat_id, "message_id": message.message_id})
 
 
+class _FormError(Exception):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status, self.message = status, message
+
+
+async def _read_part(part: BodyPartReader, limit: int, total: int) -> bytes:
+    """Читает часть формы кусками; > limit или общий объём > MAX_FILES_BODY — 413, без дочитывания."""
+    data = bytearray()
+    while chunk := await part.read_chunk(64 * 1024):
+        data += chunk
+        if len(data) > limit or total + len(data) > MAX_FILES_BODY:
+            raise _FormError(413, "Слишком большой запрос: файлы письма — до 50 МБ за раз")
+    return bytes(data)
+
+
+def _file_name(raw: str | None) -> str:
+    # aiohttp-клиенты кодируют не-ASCII имя в filename="..." процентами, а сервер его не раскодирует
+    name = unquote(raw or "").replace("/", "_").replace("\\", "_").strip()[:200]
+    return name or "file"
+
+
+async def _read_files_form(request: web.Request) -> tuple[str, int, list[tuple[str, bytes]]]:
+    if request.content_length and request.content_length > MAX_FILES_BODY:
+        raise _FormError(413, "Слишком большой запрос: файлы письма — до 50 МБ за раз")
+    try:
+        reader = await request.multipart()
+    except Exception:  # noqa: BLE001
+        raise _FormError(400, "Ожидается multipart/form-data") from None
+    fields: dict[str, str] = {}
+    files: list[tuple[str, bytes]] = []
+    total = 0
+    try:
+        while (part := await reader.next()) is not None:
+            if not isinstance(part, BodyPartReader):
+                raise _FormError(400, "Вложенные multipart не поддерживаются")
+            if part.name == "file":
+                if len(files) >= MAX_FILES:
+                    raise _FormError(400, f"Больше {MAX_FILES} файлов в одном запросе")
+                content = await _read_part(part, MAX_FILES_BODY, total)
+                if not content:
+                    raise _FormError(400, "Пустой файл")
+                total += len(content)
+                files.append((_file_name(part.filename), content))
+            elif part.name in ("mail_id", "reply_to"):
+                fields[part.name] = (await _read_part(part, MAX_FIELD, total)).decode("utf-8", "replace").strip()
+    except _FormError:
+        raise
+    except Exception:  # noqa: BLE001 — оборванная или битая форма
+        raise _FormError(400, "Не удалось прочитать форму") from None
+
+    mail_id = fields.get("mail_id", "")
+    if not mail_id or len(mail_id) > 40:
+        raise _FormError(400, "Поле «mail_id» — строка до 40 символов")
+    reply_to = fields.get("reply_to", "")
+    if not reply_to.isdigit() or int(reply_to) <= 0:
+        raise _FormError(400, "Поле «reply_to» — номер сообщения с текстом письма")
+    if not files:
+        raise _FormError(400, "Нет файлов")
+    return mail_id, int(reply_to), files
+
+
+async def forward_mail_files(request: web.Request) -> web.Response:
+    chat_id = storage.manager_chat_id
+    if not chat_id:
+        log.error("API: файлы письма не отправлены — чат менеджеров не выбран")
+        return _json_error(503, "Чат для заявок не задан: владелец выбирает его в боте через /admin")
+    try:
+        mail_id, reply_to, files = await _read_files_form(request)
+    except _FormError as e:
+        return _json_error(e.status, e.message)
+
+    bot: Bot = request.app["bot"]
+    reply = ReplyParameters(message_id=reply_to, allow_sending_without_reply=True)
+    try:
+        if len(files) == 1:
+            name, content = files[0]
+            sent = [await bot.send_document(chat_id, BufferedInputFile(content, name), reply_parameters=reply,
+                                            request_timeout=FILES_TIMEOUT)]
+        else:
+            media = [InputMediaDocument(media=BufferedInputFile(content, name)) for name, content in files]
+            sent = await bot.send_media_group(chat_id, media, reply_parameters=reply, request_timeout=FILES_TIMEOUT)
+    except Exception as e:  # любую ошибку Telegram отдаём сайту как 502
+        log.exception("API: Telegram не принял файлы письма %s", mail_id)
+        return _json_error(502, f"Telegram не принял файлы: {e}")
+
+    message_ids = [m.message_id for m in sent]
+    log.info("API: файлы письма %s (%d шт.) отправлены в чат %s ответом на %s", mail_id, len(files), chat_id, reply_to)
+    return web.json_response({"ok": True, "chat_id": chat_id, "message_ids": message_ids})
+
+
 def build_app(bot: Bot, secret: str) -> web.Application:
-    app = web.Application(middlewares=[auth_middleware], client_max_size=MAX_BODY)
+    app = web.Application(middlewares=[auth_middleware], client_max_size=MAX_FILES_BODY)
     app["bot"] = bot
     app["secret"] = secret
     app.add_routes([
@@ -236,6 +362,7 @@ def build_app(bot: Bot, secret: str) -> web.Application:
         web.get("/api/v1/status", status),
         web.post("/api/v1/leads", create_lead),
         web.post("/api/v1/mail", forward_mail),
+        web.post("/api/v1/mail/files", forward_mail_files),
     ])
     return app
 
