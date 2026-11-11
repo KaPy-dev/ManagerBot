@@ -16,6 +16,12 @@ def format_size(size: int) -> str:
     return f"{size / 1024 / 1024:.1f} МБ"
 
 
+def _attachment_label(a: dict) -> str:
+    """«смета.pdf (178 КБ)»; с пометкой — «видео.mp4 (310.0 МБ, не переслано — больше 45 МБ)»."""
+    note = f", {escape(str(a['note']))}" if a.get("note") else ""
+    return f"{escape(str(a['name']))} ({format_size(int(a.get('size') or 0))}{note})"
+
+
 def build_mail_text(data: dict) -> str:
     """HTML-текст письма для чата менеджеров: кто написал (имя и адрес отдельно), тема, вложения, текст, дата."""
     sender = escape(str(data.get("sender") or ""))
@@ -30,7 +36,7 @@ def build_mail_text(data: dict) -> str:
     lines.append(f"📝 <b>Тема:</b> {escape(str(data.get('subject') or '(без темы)'))}")
     attachments = [a for a in data.get("attachments") or [] if isinstance(a, dict) and a.get("name")]
     if attachments:
-        listed = ", ".join(f"{escape(str(a['name']))} ({format_size(int(a.get('size') or 0))})" for a in attachments[:10])
+        listed = ", ".join(_attachment_label(a) for a in attachments[:10])
         more = f" и ещё {len(attachments) - 10}" if len(attachments) > 10 else ""
         lines.append(f"📎 <b>Вложения:</b> {listed}{more}")
     body = str(data.get("body") or "").strip()
